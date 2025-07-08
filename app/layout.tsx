@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     title: "हनुमान चालीसा संकल्प ट्रैकर",
     description:
       "अपने हनुमान चालीसा संकल्प की प्रगति को ट्रैक करें और प्रेरित रहें। Hanuman Chalisa Sankalp Tracker for daily spiritual progress.",
-    url: "https://yourdomain.com/", // Replace with your actual domain
+    url: "https://hanumanchalisasankalp.vercel.app", // Replace with your actual domain
     siteName: "हनुमान चालीसा संकल्प ट्रैकर",
     images: [
       {
