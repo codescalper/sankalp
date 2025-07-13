@@ -51,11 +51,159 @@ const SankalpTracker: React.FC = () => {
   const [totalDays, setTotalDays] = useState<number>(0);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
 
   const STORAGE_KEY = 'hanuman-chalisa-sankalp';
   const STORAGE_VERSION = 1;
   const MAX_SANKALP_DAYS = 365;
   const MIN_SANKALP_DAYS = 1;
+
+  // Notification functions
+  const requestNotificationPermission = async (): Promise<boolean> => {
+    if (!('Notification' in window)) {
+      console.warn('This browser does not support notifications');
+      return false;
+    }
+
+    if (Notification.permission === 'granted') {
+      setNotificationPermission('granted');
+      return true;
+    }
+
+    if (Notification.permission === 'denied') {
+      setNotificationPermission('denied');
+      return false;
+    }
+
+    try {
+      // Add a small delay to make the permission request less jarring
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      return permission === 'granted';
+    } catch (error) {
+      console.error('Error requesting notification permission:', error);
+      setNotificationPermission('denied');
+      return false;
+    }
+  };
+
+  const showNotification = (title: string, body: string, icon?: string) => {
+    if (Notification.permission !== 'granted') {
+      return;
+    }
+
+    try {
+      const notification = new Notification(title, {
+        body: body,
+        icon: icon || '🚩',
+        tag: 'hanuman-chalisa-reminder',
+        requireInteraction: true,
+        badge: '🙏'
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+
+      // Auto close after 10 seconds
+      setTimeout(() => {
+        notification.close();
+      }, 10000);
+    } catch (error) {
+      console.error('Error showing notification:', error);
+    }
+  };
+
+  const scheduleNotifications = () => {
+    if (Notification.permission !== 'granted') {
+      return;
+    }
+
+    // Check if notifications are already scheduled to avoid duplicates
+    const existingTimers = JSON.parse(localStorage.getItem('notification-timers') || '[]');
+    if (existingTimers.length > 0) {
+      console.log('Notifications already scheduled');
+      return;
+    }
+
+    // Clear any existing timers first
+    existingTimers.forEach((timerId: number) => clearTimeout(timerId));
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Morning notification (10:00 AM IST)
+    const morningTime = new Date(today);
+    morningTime.setHours(10, 0, 0, 0);
+    
+    // Evening notification (9:00 PM IST)
+    const eveningTime = new Date(today);
+    eveningTime.setHours(21, 0, 0, 0);
+
+    const timers: number[] = [];
+
+    // Schedule morning notification
+    if (morningTime > now) {
+      const morningTimeout = setTimeout(() => {
+        showNotification(
+          '🌅 सुप्रभात! हनुमान चालीसा का समय',
+          'आज का हनुमान चालीसा पाठ पूरा करने का समय है। जय हनुमान! 🙏'
+        );
+        scheduleNextDayNotifications();
+      }, morningTime.getTime() - now.getTime());
+      timers.push(morningTimeout as unknown as number);
+    }
+
+    // Schedule evening notification
+    if (eveningTime > now) {
+      const eveningTimeout = setTimeout(() => {
+        showNotification(
+          '🌙 शुभ संध्या! हनुमान चालीसा स्मरण',
+          'यदि आपने आज का पाठ नहीं किया है तो कृपया पूरा करें। हर हर महादेव! 🚩'
+        );
+        scheduleNextDayNotifications();
+      }, eveningTime.getTime() - now.getTime());
+      timers.push(eveningTimeout as unknown as number);
+    }
+
+    // If both times have passed today, schedule for tomorrow
+    if (morningTime <= now && eveningTime <= now) {
+      scheduleNextDayNotifications();
+    }
+
+    // Save timer IDs to localStorage
+    localStorage.setItem('notification-timers', JSON.stringify(timers));
+    console.log(`Scheduled ${timers.length} notifications for today`);
+  };
+
+  const forceRescheduleNotifications = () => {
+    // Clear existing timers first
+    const existingTimers = JSON.parse(localStorage.getItem('notification-timers') || '[]');
+    existingTimers.forEach((timerId: number) => clearTimeout(timerId));
+    localStorage.removeItem('notification-timers');
+    
+    // Then schedule new ones
+    scheduleNotifications();
+  };
+
+  const scheduleNextDayNotifications = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+
+    const timeUntilMidnight = tomorrow.getTime() - new Date().getTime();
+    
+    const midnightTimeout = setTimeout(() => {
+      scheduleNotifications();
+    }, timeUntilMidnight);
+
+    const existingTimers = JSON.parse(localStorage.getItem('notification-timers') || '[]');
+    existingTimers.push(midnightTimeout as unknown as number);
+    localStorage.setItem('notification-timers', JSON.stringify(existingTimers));
+  };
 
   // Load data from localStorage on component mount
   useEffect(() => {
@@ -132,6 +280,77 @@ const SankalpTracker: React.FC = () => {
     };
     initializeApp();
   }, []);
+
+  // Handle notification permissions and scheduling
+  useEffect(() => {
+    const initializeNotifications = async () => {
+      if (sankalpStarted && typeof window !== 'undefined') {
+        const hasPermission = await requestNotificationPermission();
+        if (hasPermission) {
+          scheduleNotifications();
+          
+          // Show welcome notification
+          setTimeout(() => {
+            showNotification(
+              '🚩 संकल्प शुरू हो गया!',
+              'आपका हनुमान चालीसा संकल्प सफलतापूर्वक शुरू हो गया है। हम आपको दिन में दो बार याद दिलाएंगे। जय बजरंगबली! 🙏'
+            );
+          }, 2000);
+        }
+      }
+    };
+
+    initializeNotifications();
+
+    // Cleanup function to clear timers when component unmounts or sankalp ends
+    return () => {
+      if (typeof window !== 'undefined') {
+        const existingTimers = JSON.parse(localStorage.getItem('notification-timers') || '[]');
+        existingTimers.forEach((timerId: number) => clearTimeout(timerId));
+        localStorage.removeItem('notification-timers');
+      }
+    };
+  }, [sankalpStarted]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Check notification permission on component mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  // Handle existing users notification setup
+  useEffect(() => {
+    const setupExistingUserNotifications = async () => {
+      // Only run this for existing users who have already started sankalp
+      // and when the app has finished loading
+      if (sankalpStarted && !isLoading && typeof window !== 'undefined') {
+        // Check if notifications are not set up yet
+        const notificationStatus = Notification.permission;
+        
+        if (notificationStatus === 'default') {
+          // For existing users, ask for permission politely
+          const hasPermission = await requestNotificationPermission();
+          if (hasPermission) {
+            forceRescheduleNotifications();
+            
+            // Show a gentle welcome back notification for existing users
+            setTimeout(() => {
+              showNotification(
+                '🙏 आपका स्वागत है!',
+                'आपका संकल्प जारी है। अब हम आपको दैनिक स्मरण भेजेंगे। जय हनुमान!'
+              );
+            }, 1500);
+          }
+        } else if (notificationStatus === 'granted') {
+          // User already granted permission, just schedule notifications
+          scheduleNotifications();
+        }
+      }
+    };
+
+    setupExistingUserNotifications();
+  }, [sankalpStarted, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save data to localStorage whenever state changes
   useEffect(() => {
@@ -331,6 +550,13 @@ const SankalpTracker: React.FC = () => {
       
       // Clear localStorage
       localStorage.removeItem(STORAGE_KEY);
+      
+      // Clear notification timers
+      if (typeof window !== 'undefined') {
+        const existingTimers = JSON.parse(localStorage.getItem('notification-timers') || '[]');
+        existingTimers.forEach((timerId: number) => clearTimeout(timerId));
+        localStorage.removeItem('notification-timers');
+      }
     } catch (error) {
       console.error('Error resetting sankalp:', error);
     }
@@ -442,6 +668,17 @@ const SankalpTracker: React.FC = () => {
                 <Flame className="w-5 h-5 mr-2" />
                 संकल्प शुरू करें
               </Button>
+
+              {/* Notification Info */}
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <div className="text-lg">🔔</div>
+                  <div className="text-sm text-blue-800" style={{ fontFamily: 'Devanagari, serif' }}>
+                    <strong>सूचना सेवा:</strong> हम आपको दिन में दो बार (सुबह 10 बजे और शाम 9 बजे) हनुमान चालीसा पाठ की याद दिलाएंगे। 
+                    कृपया ब्राउज़र नोटिफिकेशन की अनुमति दें।
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -468,6 +705,33 @@ const SankalpTracker: React.FC = () => {
             </h1>
             <div className="text-3xl">🚩</div>
           </div>
+
+          {/* Notification info banner for existing users */}
+          {notificationPermission === 'default' && (
+            <div className="max-w-md mx-auto mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-1">
+                  <div className="text-lg">🔔</div>
+                  <div className="text-sm text-blue-800" style={{ fontFamily: 'Devanagari, serif' }}>
+                    दैनिक स्मरण के लिए सूचनाएं चालू करें
+                  </div>
+                </div>
+                <Button 
+                  size="sm"
+                  variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-100 text-xs px-2 py-1"
+                  onClick={async () => {
+                    const hasPermission = await requestNotificationPermission();
+                    if (hasPermission) {
+                      forceRescheduleNotifications();
+                    }
+                  }}
+                >
+                  चालू करें
+                </Button>
+              </div>
+            </div>
+          )}
           
           <div className="flex items-center justify-center gap-4 mb-4">
             <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-300 px-4 py-2">
@@ -478,6 +742,16 @@ const SankalpTracker: React.FC = () => {
               <Check className="w-4 h-4 mr-2" />
               {completedDays.size} पूर्ण
             </Badge>
+            {notificationPermission === 'granted' && (
+              <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300 px-2 py-1">
+                🔔 सूचनाएं चालू
+              </Badge>
+            )}
+            {notificationPermission === 'denied' && (
+              <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300 px-2 py-1">
+                🔕 सूचनाएं बंद
+              </Badge>
+            )}
           </div>
 
           {/* Progress Bar */}
@@ -494,33 +768,50 @@ const SankalpTracker: React.FC = () => {
             </div>
           </div>
 
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
-                <RotateCcw className="w-4 h-4 mr-2" />
-                रीसेट करें
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  रीसेट करें
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="max-w-md">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="text-center" style={{ fontFamily: 'Devanagari, serif' }}>
+                    क्या आप वाकई रीसेट करना चाहते हैं?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-center" style={{ fontFamily: 'Devanagari, serif' }}>
+                    यह आपकी सभी प्रगति को मिटा देगा। यह कार्रवाई को पूर्ववत नहीं किया जा सकता।
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>रद्द करें</AlertDialogCancel>
+                  <AlertDialogAction 
+                    onClick={resetSankalp}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    हां, रीसेट करें
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            {notificationPermission === 'denied' && (
+              <Button 
+                variant="outline" 
+                className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                onClick={async () => {
+                  const hasPermission = await requestNotificationPermission();
+                  if (hasPermission) {
+                    forceRescheduleNotifications();
+                  }
+                }}
+              >
+                🔔 सूचनाएं चालू करें
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="max-w-md">
-              <AlertDialogHeader>
-                <AlertDialogTitle className="text-center" style={{ fontFamily: 'Devanagari, serif' }}>
-                  क्या आप वाकई रीसेट करना चाहते हैं?
-                </AlertDialogTitle>
-                <AlertDialogDescription className="text-center" style={{ fontFamily: 'Devanagari, serif' }}>
-                  यह आपकी सभी प्रगति को मिटा देगा। यह कार्रवाई को पूर्ववत नहीं किया जा सकता।
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>रद्द करें</AlertDialogCancel>
-                <AlertDialogAction 
-                  onClick={resetSankalp}
-                  className="bg-red-600 hover:bg-red-700"
-                >
-                  हां, रीसेट करें
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            )}
+          </div>
         </div>
 
         {/* Calendar Grid */}
